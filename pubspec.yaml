@@ -1,0 +1,32 @@
+name: custom_telegram_client
+description: A premium high-performance Telegram client (similar to Telegram X) supporting up to 50 active accounts.
+version: 1.0.0+1
+
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI and Icons
+  cupertino_icons: ^1.0.5
+  google_fonts: ^6.1.0
+
+  # State Management & Caching
+  provider: ^6.0.5
+  shared_preferences: ^2.2.2
+  path_provider: ^2.1.1
+
+  # C++ TDLib Binding (handles network MTProto and local SQLite storage)
+  tdlib: ^1.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
