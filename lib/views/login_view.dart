@@ -19,6 +19,7 @@ class _LoginViewState extends State<LoginView> {
   String _authState = 'WAITING_PHONE';
   String _statusMessage = 'Enter your phone number to start';
   StreamSubscription? _updateSub;
+  bool _isInitializingClient = false;
 
   @override
   void initState() {
@@ -49,8 +50,13 @@ class _LoginViewState extends State<LoginView> {
   void _handleAuthStateChange(String state) {
     setState(() {
       if (state == 'authorizationStateWaitPhoneNumber') {
-        _authState = 'WAITING_PHONE';
-        _statusMessage = 'Enter your phone number to start';
+        if (_isInitializingClient) {
+          _isInitializingClient = false;
+          _sendPhoneNumber();
+        } else {
+          _authState = 'WAITING_PHONE';
+          _statusMessage = 'Enter your phone number to start';
+        }
       } else if (state == 'authorizationStateWaitCode') {
         _authState = 'WAITING_CODE';
         _statusMessage = 'Enter the 5-digit code sent to your device';
@@ -84,10 +90,21 @@ class _LoginViewState extends State<LoginView> {
     setState(() {
       _authState = 'LOADING';
       _statusMessage = 'Initializing TDLib session...';
+      _isInitializingClient = true;
     });
 
     final accountCtrl = Provider.of<AccountController>(context, listen: false);
     await accountCtrl.tdService.initClient(phone);
+  }
+
+  Future<void> _sendPhoneNumber() async {
+    final phone = _phoneController.text.trim();
+    final accountCtrl = Provider.of<AccountController>(context, listen: false);
+
+    setState(() {
+      _authState = 'LOADING';
+      _statusMessage = 'Requesting security code...';
+    });
 
     await accountCtrl.tdService.send('setAuthenticationPhoneNumber', {
       'phone_number': phone,
