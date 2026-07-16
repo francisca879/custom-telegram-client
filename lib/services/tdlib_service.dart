@@ -150,7 +150,16 @@ class TdLibService {
   void _handleInternalUpdate(Map<String, dynamic> update) {
     final type = update['@type'];
     if (type == 'updateAuthorizationState') {
-      debugPrint("Auth State Updated: ${update['authorization_state']['@type']}");
+      final state = update['authorization_state']['@type'];
+      debugPrint("Auth State Updated: $state");
+      
+      if (state == 'authorizationStateWaitEncryptionKey') {
+        send('checkDatabaseEncryptionKey', {
+          'encryption_key': '',
+        }).catchError((err) {
+          debugPrint("Failed to send encryption key: $err");
+        });
+      }
     }
   }
 
