@@ -72,20 +72,42 @@ class ChatController extends ChangeNotifier {
   Future<void> loadChats() async {
     _isLoadingChats = true;
     notifyListeners();
+    debugPrint('ChatController: Starting loadChats...');
 
     try {
-      final result = await _tdService.getChats(limit: 100);
+      debugPrint('ChatController: calling getChats...');
+      Map<String, dynamic> result;
+      try {
+        result = await _tdService.getChats(limit: 100);
+      } catch (e) {
+        debugPrint('ChatController: getChats failed: $e. Attempting TDLib loadChats...');
+        // Try calling loadChats to initialize the chat list
+        await _tdService.send('loadChats', {
+          'chat_list': {'@type': 'chatListMain'},
+          'limit': 100
+        });
+        debugPrint('ChatController: TDLib loadChats finished. Retrying getChats...');
+        result = await _tdService.getChats(limit: 100);
+      }
+
       final List<dynamic> chatIds = result['chat_ids'] ?? [];
+      debugPrint('ChatController: Found ${chatIds.length} chat IDs');
 
       _chats.clear();
-      for (final dynamic id in chatIds) {
+      // Fetch chats in parallel for faster speed
+      final futures = chatIds.map((id) async {
         try {
           final chat = await _tdService.getChat(id as int);
-          _chats.add(chat);
+          return chat;
         } catch (e) {
           debugPrint('Failed to load chat $id: $e');
+          return null;
         }
-      }
+      });
+
+      final loadedChats = await Future.wait(futures);
+      _chats.addAll(loadedChats.whereType<Map<String, dynamic>>());
+      debugPrint('ChatController: Loaded ${_chats.length} chats');
 
       // Sort by position order (TDLib 1.8+: positions array)
       _chats.sort((a, b) {
@@ -106,8 +128,10 @@ class ChatController extends ChangeNotifier {
     } finally {
       _isLoadingChats = false;
       notifyListeners();
+      debugPrint('ChatController: loadChats completed. isLoadingChats=false');
     }
   }
+
 
 
 
