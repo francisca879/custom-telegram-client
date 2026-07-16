@@ -168,9 +168,9 @@ class TdLibService {
         } else {
           c.complete(upd);
         }
-        return;
       }
     }
+
 
     // Broadcast to listeners
     _updateCtrl.add(upd);
