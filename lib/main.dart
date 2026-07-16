@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:tdlib/tdlib.dart';
 import 'services/tdlib_service.dart';
 import 'controllers/account_controller.dart';
 import 'controllers/chat_controller.dart';
@@ -9,9 +11,31 @@ import 'views/login_view.dart';
 import 'views/home_view.dart';
 import 'views/sessions_view.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  if (Platform.isMacOS) {
+    String libPath = 'libtdjson.dylib';
+    if (File('/opt/homebrew/lib/libtdjson.dylib').existsSync()) {
+      libPath = '/opt/homebrew/lib/libtdjson.dylib';
+    } else if (File('/usr/local/lib/libtdjson.dylib').existsSync()) {
+      libPath = '/usr/local/lib/libtdjson.dylib';
+    }
+    
+    try {
+      await TdPlugin.initialize(libPath);
+      debugPrint("TDLib initialized successfully with: $libPath");
+    } catch (e) {
+      debugPrint("Failed to initialize TDLib with $libPath: $e");
+    }
+  } else if (Platform.isWindows) {
+    try {
+      await TdPlugin.initialize('tdjson.dll');
+    } catch (e) {
+      debugPrint("Failed to initialize TDLib on Windows: $e");
+    }
+  }
+
   final tdService = TdLibService();
 
   runApp(
