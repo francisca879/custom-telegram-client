@@ -25,16 +25,22 @@ class ChatController extends ChangeNotifier {
   void _subscribeToUpdates() {
     _updateSub = _tdService.updates.listen((update) {
       final type = update['@type'];
-      
+
+      // Auto-load chats when TDLib becomes authorized
+      if (type == 'updateAuthorizationState') {
+        final state = update['authorization_state']?['@type'];
+        if (state == 'authorizationStateReady') {
+          debugPrint('ChatController: auth ready → loading chats');
+          loadChats();
+        }
+        return;
+      }
+
       if (type == 'updateNewMessage') {
         final message = update['message'];
         final int chatId = message['chat_id'];
-        
-        if (!_messages.containsKey(chatId)) {
-          _messages[chatId] = [];
-        }
+        if (!_messages.containsKey(chatId)) _messages[chatId] = [];
         _messages[chatId]!.insert(0, message);
-        
         final chatIndex = _chats.indexWhere((c) => c['id'] == chatId);
         if (chatIndex != -1) {
           _chats[chatIndex]['last_message'] = message;
@@ -50,9 +56,18 @@ class ChatController extends ChangeNotifier {
           _chats[chatIndex]['last_message'] = lastMessage;
           notifyListeners();
         }
+      } else if (type == 'updateChatUnreadCount') {
+        final int chatId = update['chat_id'];
+        final int count = update['unread_count'] ?? 0;
+        final chatIndex = _chats.indexWhere((c) => c['id'] == chatId);
+        if (chatIndex != -1) {
+          _chats[chatIndex]['unread_count'] = count;
+          notifyListeners();
+        }
       }
     });
   }
+
 
   Future<void> loadChats() async {
     _isLoadingChats = true;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/tdlib_service.dart';
@@ -43,10 +44,24 @@ class AccountController extends ChangeNotifier {
   final List<TelegramAccount> _accounts = [];
   TelegramAccount? _currentAccount;
   bool _isLoading = false;
+  StreamSubscription? _authSub;
 
   AccountController(this._tdService) {
     _loadAccountsFromStorage();
+    // Notify UI when TDLib auth state changes (e.g. authorizationStateReady)
+    _authSub = _tdService.updates.listen((update) {
+      if (update['@type'] == 'updateAuthorizationState') {
+        notifyListeners();
+      }
+    });
   }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
+
 
   List<TelegramAccount> get accounts => _accounts;
   TelegramAccount? get currentAccount => _currentAccount;

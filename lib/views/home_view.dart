@@ -60,6 +60,7 @@ class _HomeViewState extends State<HomeView> {
     return Consumer2<AccountController, ChatController>(
       builder: (ctx, accCtrl, chatCtrl, _) {
         final current = accCtrl.currentAccount;
+        final tdSvc   = accCtrl.tdService;
         return Scaffold(
           backgroundColor: _bg,
           appBar: _buildAppBar(ctx, accCtrl, current),
@@ -70,17 +71,35 @@ class _HomeViewState extends State<HomeView> {
             elevation: 3,
             child: const Icon(Icons.edit_outlined, color: Colors.white, size: 22),
           ),
-          body: chatCtrl.isLoadingChats
-              ? const Center(child: CircularProgressIndicator(color: _blue, strokeWidth: 2))
-              : current == null
-                  ? _buildNoAccount(ctx)
-                  : chatCtrl.chats.isEmpty
-                      ? _buildEmptyChats()
-                      : _buildChatList(ctx, chatCtrl.chats),
+          body: current == null
+              ? _buildNoAccount(ctx)
+              : chatCtrl.isLoadingChats
+                  ? const Center(child: CircularProgressIndicator(color: _blue, strokeWidth: 2))
+                  : !tdSvc.isAuthorized
+                      ? _buildConnecting()
+                      : chatCtrl.chats.isEmpty
+                          ? _buildEmptyChats()
+                          : _buildChatList(ctx, chatCtrl.chats),
         );
       },
     );
   }
+
+  Widget _buildConnecting() {
+    return Center(
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const SizedBox(
+          width: 36, height: 36,
+          child: CircularProgressIndicator(color: _blue, strokeWidth: 2.5),
+        ),
+        const SizedBox(height: 20),
+        Text('Connecting...', style: GoogleFonts.roboto(color: _dim, fontSize: 16)),
+        const SizedBox(height: 8),
+        Text('Waiting for Telegram servers', style: GoogleFonts.roboto(color: _dim.withOpacity(0.6), fontSize: 13)),
+      ]),
+    );
+  }
+
 
   // ── AppBar ────────────────────────────────────────────────────────────────
   AppBar _buildAppBar(BuildContext ctx, AccountController acc, dynamic current) {
@@ -540,6 +559,19 @@ class _SearchPageState extends State<_SearchPage> {
   }
 
   Future<void> _search(String q) async {
+    if (!widget.tdService.isAuthorized) {
+      if (!mounted) return;
+      setState(() { _results = []; _loading = false; });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Still connecting to Telegram, please wait...'),
+          backgroundColor: Color(0xFF1C2733),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
     final results = <Map<String, dynamic>>[];
 
     // 1. Search contacts by name
@@ -560,11 +592,7 @@ class _SearchPageState extends State<_SearchPage> {
       try {
         final chat = await widget.tdService.searchPublicChat(uname);
         if (chat['id'] != null) {
-          // Avoid duplicate if already in contacts
-          final exists = results.any((r) {
-            final cid = (chat['id'] as int?) ?? 0;
-            return r['id'] == cid;
-          });
+          final exists = results.any((r) => r['id'] == chat['id']);
           if (!exists) results.insert(0, {'_src': 'public', ...chat});
         }
       } catch (_) {}
@@ -573,6 +601,7 @@ class _SearchPageState extends State<_SearchPage> {
     if (!mounted) return;
     setState(() { _results = results; _loading = false; });
   }
+
 
   String _getName(Map<String, dynamic> item) {
     final src = item['_src'];

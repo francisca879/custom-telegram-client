@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 class TdLibService {
   int? _clientId;
   int _reqId = 0;
+  bool _isAuthorized = false;
   final Map<String, Completer<Map<String, dynamic>>> _pending = {};
   final StreamController<Map<String, dynamic>> _updateCtrl =
       StreamController.broadcast();
@@ -17,6 +18,7 @@ class TdLibService {
   Stream<Map<String, dynamic>> get updates => _updateCtrl.stream;
   int? get clientId => _clientId;
   bool get isReady => _clientId != null;
+  bool get isAuthorized => _isAuthorized;
 
   // ── Init / Destroy ──────────────────────────────────────────────────────
   Future<void> initClient(String phoneNumber) async {
@@ -54,9 +56,9 @@ class TdLibService {
   Future<void> destroyClient() async {
     _timer?.cancel();
     _timer = null;
+    _isAuthorized = false;
     final id = _clientId;
     _clientId = null;
-    // Cancel all pending requests
     for (final c in _pending.values) {
       c.completeError('Client destroyed');
     }
@@ -180,6 +182,11 @@ class TdLibService {
       debugPrint('Auth: $state');
       if (state == 'authorizationStateWaitEncryptionKey') {
         _rawSend({'@type': 'checkDatabaseEncryptionKey', 'encryption_key': ''});
+      } else if (state == 'authorizationStateReady') {
+        _isAuthorized = true;
+        debugPrint('TDLib AUTHORIZED ✓');
+      } else if (state == 'authorizationStateClosed' || state == 'authorizationStateClosing') {
+        _isAuthorized = false;
       }
     }
   }
