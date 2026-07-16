@@ -8,13 +8,15 @@ class ChatController extends ChangeNotifier {
   final Map<int, List<Map<String, dynamic>>> _messages = {};
   StreamSubscription? _updateSub;
   bool _isLoadingChats = false;
+  bool _isLoadingMessages = false;
 
   ChatController(this._tdService) {
     _subscribeToUpdates();
   }
 
   List<Map<String, dynamic>> get chats => _chats;
-  bool get isLoadingChats => _isLoadingChats;
+  bool get isLoadingChats    => _isLoadingChats;
+  bool get isLoadingMessages => _isLoadingMessages;
 
   List<Map<String, dynamic>> getMessagesForChat(int chatId) {
     return _messages[chatId] ?? [];
@@ -80,14 +82,17 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<void> loadMessages(int chatId) async {
+    _isLoadingMessages = true;
+    notifyListeners();
     try {
       final result = await _tdService.getChatHistory(chatId, limit: 40);
       final List<dynamic> msgs = result['messages'] ?? [];
-      
       _messages[chatId] = List<Map<String, dynamic>>.from(msgs);
-      notifyListeners();
     } catch (e) {
       debugPrint("Error loading messages for chat $chatId: $e");
+    } finally {
+      _isLoadingMessages = false;
+      notifyListeners();
     }
   }
 

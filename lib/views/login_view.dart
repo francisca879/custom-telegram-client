@@ -1,234 +1,208 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../controllers/account_controller.dart';
 
+// ─── Telegram brand colours ────────────────────────────────────────────────
+const _bg    = Color(0xFF17212B);
+const _surf  = Color(0xFF1C2733);
+const _blue  = Color(0xFF2AABEE);
+const _dim   = Color(0xFF8A9DB0);
+// ──────────────────────────────────────────────────────────────────────────
+
 class LoginView extends StatefulWidget {
   const LoginView({Key? key}) : super(key: key);
-
   @override
   _LoginViewState createState() => _LoginViewState();
 }
 
-class _LoginViewState extends State<LoginView> {
-  final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _codeController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
+class _LoginViewState extends State<LoginView> with SingleTickerProviderStateMixin {
+  final _phoneCtrl    = TextEditingController();
+  final _codeCtrl     = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  final _phoneFocus   = FocusNode();
 
-  String _authState = 'WAITING_PHONE';
-  String _statusMessage = 'Enter your phone number to start';
-  StreamSubscription? _updateSub;
+  String _step          = 'PHONE';   // PHONE | CODE | PASSWORD | LOADING
+  String _errorMsg      = '';
+  bool   _obscurePwd    = true;
+  StreamSubscription? _sub;
   bool _isInitializingClient = false;
+
+  late AnimationController _fadeCtrl;
+  late Animation<double>   _fadeAnim;
 
   @override
   void initState() {
     super.initState();
+    _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeIn);
+    _fadeCtrl.forward();
     _subscribeToTdlibUpdates();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FocusScope.of(context).requestFocus(_phoneFocus);
+    });
   }
 
   @override
   void dispose() {
-    _updateSub?.cancel();
-    _phoneController.dispose();
-    _codeController.dispose();
-    _passwordController.dispose();
+    _sub?.cancel();
+    _phoneCtrl.dispose();
+    _codeCtrl.dispose();
+    _passwordCtrl.dispose();
+    _phoneFocus.dispose();
+    _fadeCtrl.dispose();
     super.dispose();
   }
 
   void _subscribeToTdlibUpdates() {
-    final accountCtrl = Provider.of<AccountController>(context, listen: false);
-    _updateSub = accountCtrl.tdService.updates.listen((update) {
-      final type = update['@type'];
-      if (type == 'updateAuthorizationState') {
-        final authState = update['authorization_state']['@type'];
-        _handleAuthStateChange(authState);
+    final ctrl = Provider.of<AccountController>(context, listen: false);
+    _sub = ctrl.tdService.updates.listen((update) {
+      if (update['@type'] == 'updateAuthorizationState') {
+        _handleAuth(update['authorization_state']['@type']);
       }
     });
   }
 
-  void _handleAuthStateChange(String state) {
-    setState(() {
-      if (state == 'authorizationStateWaitPhoneNumber') {
-        if (_isInitializingClient) {
-          _isInitializingClient = false;
-          _sendPhoneNumber();
-        } else {
-          _authState = 'WAITING_PHONE';
-          _statusMessage = 'Enter your phone number to start';
-        }
-      } else if (state == 'authorizationStateWaitCode') {
-        _authState = 'WAITING_CODE';
-        _statusMessage = 'Enter the 5-digit code sent to your device';
-      } else if (state == 'authorizationStateWaitPassword') {
-        _authState = 'WAITING_PASSWORD';
-        _statusMessage = 'Enter your Two-Step Verification cloud password';
-      } else if (state == 'authorizationStateReady') {
-        _authState = 'READY';
-        _registerCompletedProfile();
+  void _handleAuth(String state) {
+    if (!mounted) return;
+    setState(() => _errorMsg = '');
+    if (state == 'authorizationStateWaitPhoneNumber') {
+      if (_isInitializingClient) {
+        _isInitializingClient = false;
+        _doSendPhone();
+      } else {
+        _transition('PHONE');
       }
+    } else if (state == 'authorizationStateWaitCode') {
+      _transition('CODE');
+    } else if (state == 'authorizationStateWaitPassword') {
+      _transition('PASSWORD');
+    } else if (state == 'authorizationStateReady') {
+      _completeLogin();
+    } else if (state == 'authorizationStateWaitTdlibParameters') {
+      // ignore
+    }
+  }
+
+  void _transition(String step) {
+    _fadeCtrl.reverse().then((_) {
+      if (!mounted) return;
+      setState(() => _step = step);
+      _fadeCtrl.forward();
     });
   }
 
-  Future<void> _registerCompletedProfile() async {
-    final accountCtrl = Provider.of<AccountController>(context, listen: false);
-    final me = await accountCtrl.tdService.send('getMe', {});
-    
-    await accountCtrl.registerNewAccount(
-      phoneNumber: _phoneController.text.trim(),
+  Future<void> _completeLogin() async {
+    final ctrl = Provider.of<AccountController>(context, listen: false);
+    final me = await ctrl.tdService.send('getMe', {});
+    await ctrl.registerNewAccount(
+      phoneNumber: _phoneCtrl.text.trim(),
       firstName: me['first_name'] ?? 'User',
-      username: me['username'] ?? 'NoUsername',
+      username: me['username'] ?? '',
     );
-
+    if (!mounted) return;
     Navigator.pushReplacementNamed(context, '/home');
   }
 
-  Future<void> _submitPhone() async {
-    final phone = _phoneController.text.trim();
-    if (phone.isEmpty) return;
-
-    setState(() {
-      _authState = 'LOADING';
-      _statusMessage = 'Initializing TDLib session...';
-      _isInitializingClient = true;
-    });
-
-    final accountCtrl = Provider.of<AccountController>(context, listen: false);
-    await accountCtrl.tdService.initClient(phone);
+  // ── Actions ─────────────────────────────────────────────────────────────
+  Future<void> _onNext() async {
+    setState(() => _errorMsg = '');
+    if (_step == 'PHONE') {
+      final phone = _phoneCtrl.text.trim();
+      if (phone.length < 7) {
+        setState(() => _errorMsg = 'Enter a valid phone number');
+        return;
+      }
+      setState(() { _step = 'LOADING'; _isInitializingClient = true; });
+      final ctrl = Provider.of<AccountController>(context, listen: false);
+      await ctrl.tdService.initClient(phone);
+    } else if (_step == 'CODE') {
+      final code = _codeCtrl.text.trim();
+      if (code.length != 5) {
+        setState(() => _errorMsg = 'Code must be 5 digits');
+        return;
+      }
+      setState(() => _step = 'LOADING');
+      final ctrl = Provider.of<AccountController>(context, listen: false);
+      await ctrl.tdService.send('checkAuthenticationCode', {'code': code});
+    } else if (_step == 'PASSWORD') {
+      final pwd = _passwordCtrl.text;
+      if (pwd.isEmpty) {
+        setState(() => _errorMsg = 'Password cannot be empty');
+        return;
+      }
+      setState(() => _step = 'LOADING');
+      final ctrl = Provider.of<AccountController>(context, listen: false);
+      await ctrl.tdService.send('checkAuthenticationPassword', {'password': pwd});
+    }
   }
 
-  Future<void> _sendPhoneNumber() async {
-    final phone = _phoneController.text.trim();
-    final accountCtrl = Provider.of<AccountController>(context, listen: false);
-
-    setState(() {
-      _authState = 'LOADING';
-      _statusMessage = 'Requesting security code...';
-    });
-
-    await accountCtrl.tdService.send('setAuthenticationPhoneNumber', {
-      'phone_number': phone,
-    });
-  }
-
-  Future<void> _submitCode() async {
-    final code = _codeController.text.trim();
-    if (code.isEmpty) return;
-
-    setState(() {
-      _authState = 'LOADING';
-      _statusMessage = 'Verifying security code...';
-    });
-
-    final accountCtrl = Provider.of<AccountController>(context, listen: false);
-    await accountCtrl.tdService.send('checkAuthenticationCode', {
-      'code': code,
-    });
-  }
-
-  Future<void> _submitPassword() async {
-    final password = _passwordController.text.trim();
-    if (password.isEmpty) return;
-
-    setState(() {
-      _authState = 'LOADING';
-      _statusMessage = 'Unlocking 2FA security database...';
-    });
-
-    final accountCtrl = Provider.of<AccountController>(context, listen: false);
-    await accountCtrl.tdService.send('checkAuthenticationPassword', {
-      'password': password,
+  Future<void> _doSendPhone() async {
+    setState(() => _step = 'LOADING');
+    final ctrl = Provider.of<AccountController>(context, listen: false);
+    await ctrl.tdService.send('setAuthenticationPhoneNumber', {
+      'phone_number': _phoneCtrl.text.trim(),
     });
   }
 
+  void _goBack() {
+    if (_step == 'CODE') _transition('PHONE');
+    else if (_step == 'PASSWORD') _transition('CODE');
+    else Navigator.maybePop(context);
+  }
+
+  // ── UI ───────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final isLoading = _step == 'LOADING';
     return Scaffold(
-      backgroundColor: const Color(0xFF000000),
+      backgroundColor: _bg,
+      appBar: _step != 'PHONE'
+          ? AppBar(
+              backgroundColor: _bg,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: isLoading ? null : _goBack,
+              ),
+              systemOverlayStyle: SystemUiOverlayStyle.light,
+            )
+          : null,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28.0),
+        child: FadeTransition(
+          opacity: _fadeAnim,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 60),
-              Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2FA4E7),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Icon(Icons.send_rounded, color: Colors.white, size: 26),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 48),
+                      _buildLogo(),
+                      const SizedBox(height: 32),
+                      _buildTitle(),
+                      const SizedBox(height: 12),
+                      _buildSubtitle(),
+                      const SizedBox(height: 36),
+                      _buildInput(),
+                      if (_errorMsg.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _errorMsg,
+                          style: GoogleFonts.roboto(color: Colors.redAccent, fontSize: 13),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(width: 16),
-                  Text(
-                    "Telegram X Custom",
-                    style: GoogleFonts.outfit(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 50),
-              Text(
-                "Welcome Back",
-                style: GoogleFonts.outfit(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                _statusMessage,
-                style: GoogleFonts.outfit(
-                  color: Colors.grey[400],
-                  fontSize: 16,
-                ),
-              ),
-              const SizedBox(height: 40),
-              if (_authState == 'WAITING_PHONE') ...[
-                _buildTextField(
-                  controller: _phoneController,
-                  hintText: "+91 8718005751",
-                  labelText: "Phone Number",
-                  icon: Icons.phone_android,
-                  keyboardType: TextInputType.phone,
-                ),
-                const SizedBox(height: 30),
-                _buildSubmitButton("Send Code", _submitPhone),
-              ] else if (_authState == 'WAITING_CODE') ...[
-                _buildTextField(
-                  controller: _codeController,
-                  hintText: "12345",
-                  labelText: "Security Code",
-                  icon: Icons.lock_outline_rounded,
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 30),
-                _buildSubmitButton("Verify Code", _submitCode),
-              ] else if (_authState == 'WAITING_PASSWORD') ...[
-                _buildTextField(
-                  controller: _passwordController,
-                  hintText: "Enter 2FA Password",
-                  labelText: "Cloud Password",
-                  icon: Icons.vpn_key_outlined,
-                  obscureText: true,
-                ),
-                const SizedBox(height: 30),
-                _buildSubmitButton("Unlock Session", _submitPassword),
-              ] else if (_authState == 'LOADING') ...[
-                const Center(
-                  child: CircularProgressIndicator(
-                    color: Color(0xFF2FA4E7),
-                  ),
-                )
-              ],
+              _buildNextButton(isLoading),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -236,58 +210,189 @@ class _LoginViewState extends State<LoginView> {
     );
   }
 
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String hintText,
-    required String labelText,
-    required IconData icon,
-    bool obscureText = false,
-    TextInputType keyboardType = TextInputType.text,
-  }) {
+  Widget _buildLogo() {
     return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF161618),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2C2C2E)),
+      width: 96,
+      height: 96,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF2AABEE), Color(0xFF229ED9)],
+        ),
       ),
-      child: TextField(
-        controller: controller,
-        obscureText: obscureText,
-        keyboardType: keyboardType,
-        style: const TextStyle(color: Colors.white, fontSize: 16),
-        decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: const Color(0xFF2FA4E7)),
-          hintText: hintText,
-          hintStyle: const TextStyle(color: Colors.grey),
-          labelText: labelText,
-          labelStyle: const TextStyle(color: Colors.grey),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+      child: const Icon(Icons.send_rounded, color: Colors.white, size: 44),
+    );
+  }
+
+  Widget _buildTitle() {
+    final titles = {
+      'PHONE': 'Your Phone',
+      'CODE': 'Enter Code',
+      'PASSWORD': 'Two-Step Verification',
+      'LOADING': 'Please Wait...',
+    };
+    return Text(
+      titles[_step] ?? '',
+      style: GoogleFonts.roboto(
+        color: Colors.white,
+        fontSize: 26,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.3,
+      ),
+      textAlign: TextAlign.center,
+    );
+  }
+
+  Widget _buildSubtitle() {
+    final subs = {
+      'PHONE':    'Enter your phone number to sign in.',
+      'CODE':     'We sent a code to ${_phoneCtrl.text.trim()}.\nCheck Telegram or your SMS.',
+      'PASSWORD': 'Your account has Two-Step Verification\nenabled. Enter your cloud password.',
+      'LOADING':  '',
+    };
+    return Text(
+      subs[_step] ?? '',
+      style: GoogleFonts.roboto(color: _dim, fontSize: 14.5, height: 1.5),
+      textAlign: TextAlign.center,
+    );
+  }
+
+  Widget _buildInput() {
+    if (_step == 'LOADING') {
+      return const SizedBox(
+        height: 56,
+        child: Center(child: CircularProgressIndicator(color: _blue, strokeWidth: 2.5)),
+      );
+    }
+    if (_step == 'PHONE') {
+      return _TgTextField(
+        controller: _phoneCtrl,
+        focusNode: _phoneFocus,
+        hint: '+91 XXXXX XXXXX',
+        label: 'Phone Number',
+        keyboardType: TextInputType.phone,
+        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9+\- ]'))],
+        onSubmitted: (_) => _onNext(),
+      );
+    }
+    if (_step == 'CODE') {
+      return _TgTextField(
+        controller: _codeCtrl,
+        hint: '- - - - -',
+        label: '5-digit Code',
+        keyboardType: TextInputType.number,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(5),
+        ],
+        textAlign: TextAlign.center,
+        letterSpacing: 12,
+        onSubmitted: (_) => _onNext(),
+      );
+    }
+    if (_step == 'PASSWORD') {
+      return _TgTextField(
+        controller: _passwordCtrl,
+        hint: 'Cloud Password',
+        label: 'Password',
+        obscureText: _obscurePwd,
+        suffixIcon: IconButton(
+          icon: Icon(_obscurePwd ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+              color: _dim, size: 20),
+          onPressed: () => setState(() => _obscurePwd = !_obscurePwd),
+        ),
+        onSubmitted: (_) => _onNext(),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  Widget _buildNextButton(bool isLoading) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: SizedBox(
+        width: double.infinity,
+        height: 50,
+        child: ElevatedButton(
+          onPressed: isLoading ? null : _onNext,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _blue,
+            disabledBackgroundColor: _blue.withOpacity(0.4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            elevation: 0,
+          ),
+          child: Text(
+            _step == 'PHONE' ? 'NEXT' : _step == 'CODE' ? 'VERIFY' : 'CONTINUE',
+            style: GoogleFonts.roboto(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.8,
+            ),
+          ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildSubmitButton(String label, VoidCallback onPressed) {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: ElevatedButton(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF2FA4E7),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          elevation: 0,
+// ── Shared text-field widget ─────────────────────────────────────────────────
+class _TgTextField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final String label;
+  final bool obscureText;
+  final TextInputType keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
+  final TextAlign textAlign;
+  final double? letterSpacing;
+  final Widget? suffixIcon;
+  final FocusNode? focusNode;
+  final ValueChanged<String>? onSubmitted;
+
+  const _TgTextField({
+    required this.controller,
+    required this.hint,
+    required this.label,
+    this.obscureText = false,
+    this.keyboardType = TextInputType.text,
+    this.inputFormatters,
+    this.textAlign = TextAlign.start,
+    this.letterSpacing,
+    this.suffixIcon,
+    this.focusNode,
+    this.onSubmitted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      focusNode: focusNode,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      textAlign: textAlign,
+      onSubmitted: onSubmitted,
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: 17,
+        letterSpacing: letterSpacing,
+      ),
+      cursorColor: const Color(0xFF2AABEE),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: Color(0xFF8A9DB0), fontSize: 14),
+        hintText: hint,
+        hintStyle: const TextStyle(color: Color(0xFF4A6175), fontSize: 17),
+        suffixIcon: suffixIcon,
+        enabledBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: Color(0xFF2C3E50), width: 1),
         ),
-        child: Text(
-          label,
-          style: GoogleFonts.outfit(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
+        focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: Color(0xFF2AABEE), width: 2),
         ),
       ),
     );

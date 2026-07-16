@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -5,14 +6,24 @@ import '../controllers/account_controller.dart';
 import '../controllers/chat_controller.dart';
 import 'chat_view.dart';
 
+// ─── Telegram brand colours ────────────────────────────────────────────────
+const _bg    = Color(0xFF17212B);
+const _surf  = Color(0xFF1C2733);
+const _blue  = Color(0xFF2AABEE);
+const _dim   = Color(0xFF8A9DB0);
+const _sep   = Color(0xFF1C2733);
+// ──────────────────────────────────────────────────────────────────────────
+
 class HomeView extends StatefulWidget {
   const HomeView({Key? key}) : super(key: key);
-
   @override
   _HomeViewState createState() => _HomeViewState();
 }
 
 class _HomeViewState extends State<HomeView> {
+  final _searchCtrl = TextEditingController();
+  bool _searching = false;
+
   @override
   void initState() {
     super.initState();
@@ -22,390 +33,573 @@ class _HomeViewState extends State<HomeView> {
   }
 
   @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Consumer2<AccountController, ChatController>(
-      builder: (context, accController, chatController, child) {
-        final current = accController.currentAccount;
+      builder: (context, accCtrl, chatCtrl, _) {
+        final current = accCtrl.currentAccount;
+        final chats   = chatCtrl.chats;
+
         return Scaffold(
-          backgroundColor: const Color(0xFF000000),
-          appBar: AppBar(
-            backgroundColor: const Color(0xFF161618),
-            title: Text(
-              current != null ? current.firstName : "Telegram X",
-              style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-            elevation: 0,
-            iconTheme: const IconThemeData(color: Colors.white),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.refresh, color: Colors.white),
-                onPressed: () => chatController.loadChats(),
-              )
+          backgroundColor: _bg,
+          appBar: _buildAppBar(context, accCtrl, current),
+          drawer: _buildDrawer(context, accCtrl),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () {},
+            backgroundColor: _blue,
+            elevation: 4,
+            child: const Icon(Icons.edit_outlined, color: Colors.white, size: 22),
+          ),
+          body: Column(
+            children: [
+              // ── Search bar ─────────────────────────────────────────────
+              _buildSearchBar(),
+              // ── Chat list ──────────────────────────────────────────────
+              Expanded(
+                child: chatCtrl.isLoadingChats
+                    ? const Center(child: CircularProgressIndicator(color: _blue, strokeWidth: 2))
+                    : current == null
+                        ? _buildEmpty(context)
+                        : chats.isEmpty
+                            ? _buildEmptyChats()
+                            : _buildChatList(context, chats),
+              ),
             ],
           ),
-          drawer: _buildAccountDrawer(context, accController),
-          body: chatController.isLoadingChats
-              ? const Center(
-                  child: CircularProgressIndicator(color: Color(0xFF2FA4E7)),
-                )
-              : current == null
-                  ? _buildNoAccountsBody(context)
-                  : _buildChatListBody(context, chatController),
         );
       },
     );
   }
 
-  Widget _buildNoAccountsBody(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.account_circle_outlined, color: Colors.grey, size: 80),
-            const SizedBox(height: 20),
-            Text(
-              "No accounts logged in",
-              style: GoogleFonts.outfit(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              "Add up to 50 accounts to manage and switch between them seamlessly.",
-              textAlign: TextAlign.center,
-              style: GoogleFonts.outfit(color: Colors.grey[400], fontSize: 15),
-            ),
-            const SizedBox(height: 30),
-            ElevatedButton.icon(
-              onPressed: () => Navigator.pushNamed(context, '/login'),
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text("Add Account"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2FA4E7),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  AppBar _buildAppBar(BuildContext ctx, AccountController acc, dynamic current) {
+    return AppBar(
+      backgroundColor: _surf,
+      elevation: 0,
+      titleSpacing: 0,
+      leading: Builder(
+        builder: (context) => IconButton(
+          icon: current != null
+              ? _avatar(current.firstName, radius: 18)
+              : const Icon(Icons.menu, color: Colors.white),
+          onPressed: () => Scaffold.of(context).openDrawer(),
+        ),
+      ),
+      title: _searching
+          ? TextField(
+              controller: _searchCtrl,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+              cursorColor: _blue,
+              decoration: const InputDecoration(
+                hintText: 'Search chats...',
+                hintStyle: TextStyle(color: _dim),
+                border: InputBorder.none,
               ),
+            )
+          : Text(
+              'Telegram',
+              style: GoogleFonts.roboto(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+      actions: [
+        IconButton(
+          icon: Icon(_searching ? Icons.close : Icons.search, color: Colors.white),
+          onPressed: () => setState(() {
+            _searching = !_searching;
+            if (!_searching) _searchCtrl.clear();
+          }),
+        ),
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, color: Colors.white),
+          color: const Color(0xFF232E3C),
+          onSelected: (v) {
+            if (v == 'new_account') Navigator.pushNamed(ctx, '/login');
+            if (v == 'sessions') Navigator.pushNamed(ctx, '/sessions');
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: 'new_account',
+              child: _menuItem(Icons.person_add_outlined, 'Add Account'),
+            ),
+            PopupMenuItem(
+              value: 'sessions',
+              child: _menuItem(Icons.devices_outlined, 'Active Sessions'),
             ),
           ],
         ),
-      ),
+      ],
     );
   }
 
-  Widget _buildChatListBody(BuildContext context, ChatController controller) {
-    final chats = controller.chats;
-    
-    if (chats.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.chat_bubble_outline_rounded, color: Colors.grey[600], size: 60),
-              const SizedBox(height: 16),
-              Text(
-                "Your chat list is empty",
-                style: GoogleFonts.outfit(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Chats will appear here once your account synchronizes or you start a new conversation.",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[500], fontSize: 14),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+  Widget _menuItem(IconData icon, String text) => Row(
+    children: [
+      Icon(icon, color: _dim, size: 20),
+      const SizedBox(width: 14),
+      Text(text, style: GoogleFonts.roboto(color: Colors.white, fontSize: 14)),
+    ],
+  );
 
-    return ListView.separated(
+  Widget _buildSearchBar() {
+    return Container(
+      height: 1,
+      color: const Color(0xFF0F1923),
+    );
+  }
+
+  Widget _buildChatList(BuildContext ctx, List<Map<String, dynamic>> chats) {
+    return ListView.builder(
       itemCount: chats.length,
-      separatorBuilder: (context, index) => const Divider(color: Color(0xFF1C1C1E), height: 1),
       itemBuilder: (context, index) {
-        final chat = chats[index];
-        final int chatId = chat['id'] ?? 0;
-        final String title = chat['title'] ?? 'Telegram Chat';
-        
-        final lastMessage = chat['last_message'];
-        String subtitle = "No messages";
-        if (lastMessage != null) {
-          final content = lastMessage['content'];
-          if (content != null && content['@type'] == 'messageText') {
-            subtitle = content['text']['text'] ?? "";
-          } else {
-            subtitle = "[Attachment / Media]";
+        final chat   = chats[index];
+        final chatId = (chat['id'] ?? 0) as int;
+        final title  = (chat['title'] as String?) ?? 'Unknown';
+        final lastMsg = chat['last_message'];
+        String subtitle = '';
+        if (lastMsg != null) {
+          final content = lastMsg['content'];
+          if (content?['@type'] == 'messageText') {
+            subtitle = content['text']['text'] ?? '';
+          } else if (content != null) {
+            subtitle = '📎 Attachment';
           }
         }
+        final unread = (chat['unread_count'] as int?) ?? 0;
+        final muted  = ((chat['notification_settings']?['mute_for'] ?? 0) as int) > 0;
+        final isPinned = (chat['is_pinned'] as bool?) ?? false;
 
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          leading: CircleAvatar(
-            backgroundColor: const Color(0xFF2FA4E7).withOpacity(0.15),
-            radius: 26,
-            child: Text(
-              title.isNotEmpty ? title.substring(0, 1).toUpperCase() : "?",
-              style: const TextStyle(color: Color(0xFF2FA4E7), fontWeight: FontWeight.bold, fontSize: 18),
+        return _ChatTile(
+          title: title,
+          subtitle: subtitle,
+          unreadCount: unread,
+          isMuted: muted,
+          isPinned: isPinned,
+          time: _formatTime(lastMsg?['date']),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ChatView(chatId: chatId, chatTitle: title),
             ),
           ),
-          title: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.outfit(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 6.0),
-            child: Text(
-              subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.grey, fontSize: 14),
-            ),
-          ),
-          trailing: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.grey, size: 14),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ChatView(
-                  chatId: chatId,
-                  chatTitle: title,
-                ),
-              ),
-            );
-          },
         );
       },
     );
   }
 
-  Widget _buildAccountDrawer(BuildContext context, AccountController controller) {
-    final current = controller.currentAccount;
+  Widget _buildEmpty(BuildContext ctx) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 80, height: 80,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _surf,
+              border: Border.all(color: _blue.withOpacity(0.3), width: 2),
+            ),
+            child: const Icon(Icons.person_outline, color: _dim, size: 36),
+          ),
+          const SizedBox(height: 20),
+          Text('No Account', style: GoogleFonts.roboto(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text('Add an account to get started', style: GoogleFonts.roboto(color: _dim, fontSize: 14)),
+          const SizedBox(height: 28),
+          TextButton(
+            onPressed: () => Navigator.pushNamed(ctx, '/login'),
+            style: TextButton.styleFrom(foregroundColor: _blue),
+            child: const Text('Add Account', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyChats() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.chat_bubble_outline, color: _dim, size: 64),
+          const SizedBox(height: 16),
+          Text('No chats yet', style: GoogleFonts.roboto(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text('Start a conversation', style: GoogleFonts.roboto(color: _dim, fontSize: 14)),
+        ],
+      ),
+    );
+  }
+
+  // ── Drawer ────────────────────────────────────────────────────────────────
+  Widget _buildDrawer(BuildContext ctx, AccountController ctrl) {
+    final current = ctrl.currentAccount;
     return Drawer(
-      child: Container(
-        color: const Color(0xFF161618),
-        child: Column(
-          children: [
-            UserAccountsDrawerHeader(
-              decoration: const BoxDecoration(color: Color(0xFF0F0F10)),
-              currentAccountPicture: CircleAvatar(
-                backgroundColor: const Color(0xFF2FA4E7),
-                child: Text(
-                  current != null ? current.firstName.substring(0, 1) : "T",
-                  style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+      backgroundColor: _surf,
+      child: Column(
+        children: [
+          // ── Header ──────────────────────────────────────────────────────
+          Container(
+            width: double.infinity,
+            color: _bg,
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(ctx).padding.top + 16,
+              left: 20, right: 20, bottom: 16,
+            ),
+            child: current != null ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _avatar(current.firstName, radius: 30),
+                const SizedBox(height: 14),
+                Text(
+                  current.firstName,
+                  style: GoogleFonts.roboto(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
                 ),
-              ),
-              accountName: Text(
-                current != null ? current.firstName : "Telegram X User",
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
-              ),
-              accountEmail: Text(
-                current != null ? current.phoneNumber : "No active session",
-                style: const TextStyle(color: Colors.grey),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Switch Profiles (${controller.accounts.length}/50)",
-                    style: GoogleFonts.outfit(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.person_add_alt_1, color: Color(0xFF2FA4E7), size: 20),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      Navigator.pushNamed(context, '/login');
-                    },
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: controller.accounts.length,
-                itemBuilder: (context, index) {
-                  final acc = controller.accounts[index];
-                  final isCurrent = acc.phoneNumber == current?.phoneNumber;
-                  return ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: isCurrent ? const Color(0xFF2FA4E7) : Colors.grey[800],
-                      child: Text(acc.firstName.substring(0, 1), style: const TextStyle(color: Colors.white)),
-                    ),
-                    title: Text(
-                      acc.firstName,
-                      style: GoogleFonts.outfit(
-                        color: Colors.white,
-                        fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                const SizedBox(height: 4),
+                Text(
+                  current.phoneNumber,
+                  style: GoogleFonts.roboto(color: _dim, fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                // Account switcher mini-list
+                if (ctrl.accounts.length > 1)
+                  ...ctrl.accounts.where((a) => a.phoneNumber != current.phoneNumber).map((acc) =>
+                    InkWell(
+                      onTap: () async {
+                        Navigator.pop(ctx);
+                        await ctrl.switchAccount(acc);
+                        if (ctx.mounted) {
+                          Provider.of<ChatController>(ctx, listen: false).loadChats();
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Row(
+                          children: [
+                            _avatar(acc.firstName, radius: 16, fontSize: 13),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(acc.firstName, style: GoogleFonts.roboto(color: Colors.white, fontSize: 14)),
+                                  Text(acc.phoneNumber, style: GoogleFonts.roboto(color: _dim, fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                    )
+                  ),
+              ],
+            ) : Padding(
+              padding: const EdgeInsets.only(top: 20),
+              child: Text('No Account', style: GoogleFonts.roboto(color: _dim, fontSize: 16)),
+            ),
+          ),
+          // ── Menu items ──────────────────────────────────────────────────
+          _drawerItem(Icons.person_add_outlined, 'Add Account', () {
+            Navigator.pop(ctx);
+            Navigator.pushNamed(ctx, '/login');
+          }),
+          _drawerItem(Icons.devices_outlined, 'Active Sessions', () {
+            Navigator.pop(ctx);
+            Navigator.pushNamed(ctx, '/sessions');
+          }),
+          _drawerItem(Icons.star_outline_rounded, 'Saved Messages', () {
+            Navigator.pop(ctx);
+          }),
+          const Divider(color: Color(0xFF0F1923), height: 1),
+          _drawerItem(
+            Icons.diamond_outlined,
+            'Telegram Premium',
+            () {
+              Navigator.pop(ctx);
+              _showPremiumSheet(ctx, ctrl);
+            },
+            iconColor: const Color(0xFFB069FF),
+          ),
+          const Divider(color: Color(0xFF0F1923), height: 1),
+          _drawerItem(Icons.settings_outlined, 'Settings', () {
+            Navigator.pop(ctx);
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _drawerItem(IconData icon, String label, VoidCallback onTap, {Color? iconColor}) {
+    return ListTile(
+      leading: Icon(icon, color: iconColor ?? _dim, size: 22),
+      title: Text(label, style: GoogleFonts.roboto(color: Colors.white, fontSize: 15)),
+      onTap: onTap,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+      horizontalTitleGap: 12,
+    );
+  }
+
+  // ── Premium bottom sheet ──────────────────────────────────────────────────
+  void _showPremiumSheet(BuildContext ctx, AccountController ctrl) {
+    ctrl.syncPremiumStatus();
+    showModalBottomSheet(
+      context: ctx,
+      backgroundColor: _surf,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => Consumer<AccountController>(
+        builder: (_, c, __) {
+          final acc = c.currentAccount;
+          final isPrem = acc?.isPremium ?? false;
+          return Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(width: 40, height: 4, decoration: BoxDecoration(
+                  color: _dim.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                )),
+                const SizedBox(height: 20),
+                Row(children: [
+                  const Icon(Icons.diamond_rounded, color: Color(0xFFB069FF), size: 26),
+                  const SizedBox(width: 12),
+                  Text('Telegram Premium', style: GoogleFonts.roboto(
+                    color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700,
+                  )),
+                ]),
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: isPrem
+                        ? const Color(0xFF1E1B2E)
+                        : const Color(0xFF1C1F26),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isPrem
+                          ? const Color(0xFF7B3FE4).withOpacity(0.4)
+                          : Colors.redAccent.withOpacity(0.3),
                     ),
-                    subtitle: Text(acc.phoneNumber, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                    trailing: isCurrent
-                        ? const Icon(Icons.check_circle, color: Color(0xFF2FA4E7))
-                        : IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                            onPressed: () => controller.deleteAccount(acc.phoneNumber),
-                          ),
-                    onTap: () async {
-                      Navigator.pop(context);
-                      await controller.switchAccount(acc);
-                      Provider.of<ChatController>(context, listen: false).loadChats();
+                  ),
+                  child: Row(children: [
+                    Icon(
+                      isPrem ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                      color: isPrem ? const Color(0xFFB069FF) : Colors.redAccent,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(
+                        isPrem ? 'Premium Active' : 'No Premium',
+                        style: GoogleFonts.roboto(
+                          color: isPrem ? const Color(0xFFB069FF) : Colors.redAccent,
+                          fontWeight: FontWeight.w700, fontSize: 15,
+                        ),
+                      ),
+                      Text(
+                        acc?.firstName ?? '',
+                        style: GoogleFonts.roboto(color: _dim, fontSize: 12),
+                      ),
+                    ]),
+                  ]),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(sheetCtx);
+                      try {
+                        final chat = await ctrl.tdService.searchPublicChat('PremiumBot');
+                        final chatId = (chat['id'] as int?) ?? 0;
+                        if (chatId != 0 && ctx.mounted) {
+                          Navigator.push(ctx, MaterialPageRoute(
+                            builder: (_) => ChatView(chatId: chatId, chatTitle: 'Premium Bot 💎'),
+                          ));
+                        }
+                      } catch (_) {}
                     },
-                  );
-                },
-              ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF7B3FE4),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                    label: Text('Open @PremiumBot', style: GoogleFonts.roboto(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
-            const Divider(color: Color(0xFF2C2C2E), height: 1),
-            ListTile(
-              leading: const Icon(Icons.diamond_outlined, color: Colors.purpleAccent),
-              title: Text(
-                "Telegram Premium",
-                style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w500),
-              ),
-              subtitle: const Text("Verify status & manage Premium", style: TextStyle(color: Colors.grey, fontSize: 12)),
-              onTap: () {
-                Navigator.pop(context);
-                _showPremiumDialog(context, controller);
-              },
-            ),
-            const Divider(color: Color(0xFF2C2C2E), height: 1),
-            ListTile(
-              leading: const Icon(Icons.devices_rounded, color: Colors.white),
-              title: Text(
-                "Login Activity",
-                style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w500),
-              ),
-              subtitle: const Text("Manage active device sessions", style: TextStyle(color: Colors.grey, fontSize: 12)),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, '/sessions');
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  Widget _avatar(String name, {double radius = 22, double? fontSize}) {
+    final colors = [
+      const Color(0xFF2A9FE0), const Color(0xFF47A76A), const Color(0xFFE07B39),
+      const Color(0xFF9B59B6), const Color(0xFFE74C3C), const Color(0xFF1ABC9C),
+    ];
+    final color = colors[name.codeUnitAt(0) % colors.length];
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: color,
+      child: Text(
+        name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: fontSize ?? radius * 0.75,
         ),
       ),
     );
   }
 
-  void _showPremiumDialog(BuildContext context, AccountController controller) {
-    // Sync current premium state from the server dynamically when opening the modal
-    controller.syncPremiumStatus();
+  String _formatTime(dynamic unixTs) {
+    if (unixTs == null) return '';
+    final dt = DateTime.fromMillisecondsSinceEpoch((unixTs as int) * 1000);
+    final now = DateTime.now();
+    if (dt.day == now.day && dt.month == now.month && dt.year == now.year) {
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    }
+    return '${dt.day}/${dt.month}';
+  }
+}
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return Consumer<AccountController>(
-          builder: (context, valController, child) {
-            final acc = valController.currentAccount;
-            final isPrem = acc?.isPremium ?? false;
+// ── Chat tile widget ─────────────────────────────────────────────────────────
+class _ChatTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final int unreadCount;
+  final bool isMuted;
+  final bool isPinned;
+  final String time;
+  final VoidCallback onTap;
 
-            return AlertDialog(
-              backgroundColor: const Color(0xFF161618),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: Row(
-                children: [
-                  const Icon(Icons.diamond_rounded, color: Colors.purpleAccent, size: 28),
-                  const SizedBox(width: 12),
-                  Text(
-                    "Telegram Premium",
-                    style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+  const _ChatTile({
+    required this.title,
+    required this.subtitle,
+    required this.unreadCount,
+    required this.isMuted,
+    required this.isPinned,
+    required this.time,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final avatarColors = [
+      const Color(0xFF2A9FE0), const Color(0xFF47A76A), const Color(0xFFE07B39),
+      const Color(0xFF9B59B6), const Color(0xFFE74C3C), const Color(0xFF1ABC9C),
+    ];
+    final avatarColor = avatarColors[title.isNotEmpty ? title.codeUnitAt(0) % avatarColors.length : 0];
+
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: _bg,
+          border: const Border(bottom: BorderSide(color: _sep, width: 0.5)),
+        ),
+        child: Row(
+          children: [
+            // Avatar
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: avatarColor,
+                  child: Text(
+                    title.isNotEmpty ? title.substring(0, 1).toUpperCase() : '?',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
                   ),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
+                ),
+                if (isPinned)
+                  Positioned(
+                    right: -2, bottom: -2,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(shape: BoxShape.circle, color: _bg),
+                      child: const Icon(Icons.push_pin_rounded, color: _dim, size: 12),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 14),
+            // Content
+            Expanded(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    "Account: ${acc?.firstName ?? 'User'} (${acc?.phoneNumber ?? ''})",
-                    style: GoogleFonts.outfit(color: Colors.white70, fontSize: 14),
-                  ),
-                  const SizedBox(height: 14),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: isPrem ? Colors.purple.withOpacity(0.1) : Colors.redAccent.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: isPrem ? Colors.purpleAccent.withOpacity(0.3) : Colors.redAccent.withOpacity(0.2),
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(
-                          isPrem ? Icons.check_circle : Icons.cancel_outlined,
-                          color: isPrem ? Colors.purpleAccent : Colors.redAccent,
-                          size: 32,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          isPrem ? "Premium Active 👑" : "No Active Premium ❌",
-                          style: GoogleFonts.outfit(
-                            color: isPrem ? Colors.purpleAccent : Colors.redAccent,
-                            fontWeight: FontWeight.bold,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.roboto(
+                            color: Colors.white,
                             fontSize: 16,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        time,
+                        style: GoogleFonts.roboto(
+                          color: unreadCount > 0 && !isMuted ? _blue : _dim,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    "Note: Telegram Premium is bound to your phone number on official Telegram servers.\n\n"
-                    "If this account gets frozen or deleted, you can manage or shift billing by starting @PremiumBot on your new active number.",
-                    style: GoogleFonts.outfit(color: Colors.grey, fontSize: 12, height: 1.4),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.roboto(color: _dim, fontSize: 14),
+                        ),
+                      ),
+                      if (unreadCount > 0)
+                        Container(
+                          margin: const EdgeInsets.only(left: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isMuted ? const Color(0xFF3D4F5C) : _blue,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            unreadCount > 99 ? '99+' : '$unreadCount',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Close", style: TextStyle(color: Colors.grey)),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    Navigator.pop(context);
-                    // Search for official Telegram Premium Bot and open the chat directly in the client
-                    try {
-                      final chatRes = await controller.tdService.searchPublicChat("PremiumBot");
-                      final int chatId = chatRes['id'] ?? 0;
-                      if (chatId != 0) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ChatView(
-                              chatId: chatId,
-                              chatTitle: "Premium Bot 💎",
-                            ),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("Failed to open Premium Bot: $e")),
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purple,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: Text(
-                    "Open @PremiumBot",
-                    style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
