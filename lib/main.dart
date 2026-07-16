@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tdlib/tdlib.dart';
 import 'services/tdlib_service.dart';
 import 'controllers/account_controller.dart';
@@ -36,6 +37,12 @@ void main() async {
     }
   }
 
+  // Pre-load SharedPreferences to determine correct initial route
+  final prefs = await SharedPreferences.getInstance();
+  final List<String>? savedList = prefs.getStringList('hosted_accounts');
+  final String? activePhone = prefs.getString('active_account_phone');
+  final bool hasSession = savedList != null && savedList.isNotEmpty && activePhone != null && activePhone.isNotEmpty;
+
   final tdService = TdLibService();
 
   runApp(
@@ -52,21 +59,23 @@ void main() async {
           create: (context) => SessionController(tdService),
         ),
       ],
-      child: const MyApp(),
+      child: MyApp(hasSession: hasSession),
     ),
   );
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  final bool hasSession;
+  const MyApp({Key? key, required this.hasSession}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return Consumer<AccountController>(
       builder: (context, accountCtrl, child) {
-        final String initialRoute = accountCtrl.accounts.isNotEmpty ? '/home' : '/login';
+        final String initialRoute = hasSession ? '/home' : '/login';
         
         return MaterialApp(
+
           title: 'Telegram X Custom',
           debugShowCheckedModeBanner: false,
           

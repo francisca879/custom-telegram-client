@@ -117,7 +117,16 @@ class _LoginViewState extends State<LoginView> with SingleTickerProviderStateMix
       }
       setState(() { _step = 'LOADING'; _isInitializingClient = true; });
       final ctrl = Provider.of<AccountController>(context, listen: false);
-      await ctrl.tdService.initClient(phone);
+      try {
+        await ctrl.tdService.initClient(phone);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _step = 'PHONE';
+          _isInitializingClient = false;
+          _errorMsg = e.toString().replaceAll('Exception:', '').trim();
+        });
+      }
     } else if (_step == 'CODE') {
       final code = _codeCtrl.text.trim();
       if (code.length != 5) {
@@ -126,7 +135,15 @@ class _LoginViewState extends State<LoginView> with SingleTickerProviderStateMix
       }
       setState(() => _step = 'LOADING');
       final ctrl = Provider.of<AccountController>(context, listen: false);
-      await ctrl.tdService.send('checkAuthenticationCode', {'code': code});
+      try {
+        await ctrl.tdService.send('checkAuthenticationCode', {'code': code});
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _step = 'CODE';
+          _errorMsg = e.toString().replaceAll('Exception:', '').trim();
+        });
+      }
     } else if (_step == 'PASSWORD') {
       final pwd = _passwordCtrl.text;
       if (pwd.isEmpty) {
@@ -135,17 +152,34 @@ class _LoginViewState extends State<LoginView> with SingleTickerProviderStateMix
       }
       setState(() => _step = 'LOADING');
       final ctrl = Provider.of<AccountController>(context, listen: false);
-      await ctrl.tdService.send('checkAuthenticationPassword', {'password': pwd});
+      try {
+        await ctrl.tdService.send('checkAuthenticationPassword', {'password': pwd});
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _step = 'PASSWORD';
+          _errorMsg = e.toString().replaceAll('Exception:', '').trim();
+        });
+      }
     }
   }
 
   Future<void> _doSendPhone() async {
     setState(() => _step = 'LOADING');
     final ctrl = Provider.of<AccountController>(context, listen: false);
-    await ctrl.tdService.send('setAuthenticationPhoneNumber', {
-      'phone_number': _phoneCtrl.text.trim(),
-    });
+    try {
+      await ctrl.tdService.send('setAuthenticationPhoneNumber', {
+        'phone_number': _phoneCtrl.text.trim(),
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _step = 'PHONE';
+        _errorMsg = e.toString().replaceAll('Exception:', '').trim();
+      });
+    }
   }
+
 
   void _goBack() {
     if (_step == 'CODE') _transition('PHONE');
