@@ -129,18 +129,23 @@ class TdLibService {
     return await send('terminateAllOtherSessions', {});
   }
 
+  Timer? _updateTimer;
+
   void _startUpdateLoop() {
-    Future.sync(() async {
-      while (_clientId != null) {
-        try {
-          final update = await TdClient.receive(_clientId!, 1.0);
-          if (update != null) {
-            _updateController.add(update);
-            _handleInternalUpdate(update);
-          }
-        } catch (e) {
-          debugPrint("TDLib Receive Error: $e");
+    _updateTimer?.cancel();
+    _updateTimer = Timer.periodic(const Duration(milliseconds: 50), (_) async {
+      if (_clientId == null) {
+        _updateTimer?.cancel();
+        return;
+      }
+      try {
+        final update = await TdClient.receive(_clientId!, 0.0);
+        if (update != null) {
+          _updateController.add(update);
+          _handleInternalUpdate(update);
         }
+      } catch (e) {
+        debugPrint("TDLib Receive Error: $e");
       }
     });
   }
@@ -162,6 +167,8 @@ class TdLibService {
   }
 
   Future<void> destroyClient() async {
+    _updateTimer?.cancel();
+    _updateTimer = null;
     if (_clientId != null) {
       await send('close', {});
       _clientId = null;
