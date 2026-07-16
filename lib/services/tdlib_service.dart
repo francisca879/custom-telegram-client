@@ -5,52 +5,35 @@ import 'package:flutter/foundation.dart';
 import 'package:tdlib/tdlib.dart';
 import 'package:path_provider/path_provider.dart';
 
-// Bridge class to map TDLib package JSON functions to the client wrapper
-class TdClient {
-  static Future<int> create() async {
-    return TdPlugin.instance.tdJsonClientCreate();
-  }
-
-  static Future<Map<String, dynamic>> send(int clientId, Map<String, dynamic> event) async {
-    final String req = json.encode(event);
-    TdPlugin.instance.tdJsonClientSend(clientId, req);
-    return {};
-  }
-
-  static Future<Map<String, dynamic>?> receive(int clientId, double timeout) async {
-    final String? res = TdPlugin.instance.tdJsonClientReceive(clientId, timeout);
-    if (res != null) {
-      try {
-        return json.decode(res) as Map<String, dynamic>;
-      } catch (e) {
-        debugPrint("JSON Decode Error: $e");
-      }
-    }
-    return null;
-  }
-}
-
+/// TDLib bridge — properly correlates async requests via @extra
 class TdLibService {
   int? _clientId;
-  final StreamController<Map<String, dynamic>> _updateController = StreamController.broadcast();
+  int _reqId = 0;
+  final Map<String, Completer<Map<String, dynamic>>> _pending = {};
+  final StreamController<Map<String, dynamic>> _updateCtrl =
+      StreamController.broadcast();
+  Timer? _timer;
 
-  Stream<Map<String, dynamic>> get updates => _updateController.stream;
+  Stream<Map<String, dynamic>> get updates => _updateCtrl.stream;
   int? get clientId => _clientId;
+  bool get isReady => _clientId != null;
 
+  // ── Init / Destroy ──────────────────────────────────────────────────────
   Future<void> initClient(String phoneNumber) async {
-    if (_clientId != null) {
-      await destroyClient();
-    }
+    if (_clientId != null) await destroyClient();
 
-    _clientId = await TdClient.create();
-    
+    _clientId = TdPlugin.instance.tdJsonClientCreate();
+    debugPrint('TDLib client created: $_clientId');
+
     final appDir = await getApplicationSupportDirectory();
-    final String sessionDir = '${appDir.path}/sessions/account_$phoneNumber';
+    final sessionDir = '${appDir.path}/sessions/account_$phoneNumber';
     await Directory(sessionDir).create(recursive: true);
+    debugPrint('Session dir: $sessionDir');
 
-    _startUpdateLoop();
+    _startLoop();
 
-    await send('setTdlibParameters', {
+    await _rawSend({
+      '@type': 'setTdlibParameters',
       'use_test_dc': false,
       'database_directory': sessionDir,
       'files_directory': '$sessionDir/files',
@@ -61,117 +44,143 @@ class TdLibService {
       'api_id': 39624542,
       'api_hash': 'aeec5e61d5e8fc87fe7e5b63a7b5e17c',
       'system_language_code': 'en',
-      'device_model': Platform.isAndroid ? 'Android Device' : 'iOS Device',
+      'device_model': Platform.isMacOS ? 'Mac' : 'Desktop',
       'system_version': Platform.operatingSystemVersion,
       'application_version': '1.0.0',
       'enable_storage_optimizer': true,
     });
   }
 
-  Future<Map<String, dynamic>> send(String method, Map<String, dynamic> parameters) async {
-    if (_clientId == null) throw Exception("TDLib Client not initialized");
-    final response = await TdClient.send(_clientId!, {
-      '@type': method,
-      ...parameters,
-    });
-    return response;
-  }
-
-  Future<Map<String, dynamic>> getChats({int limit = 50}) async {
-    return await send('getChats', {
-      'chat_list': {'@type': 'chatListMain'},
-      'limit': limit,
-    });
-  }
-
-  Future<Map<String, dynamic>> getChatHistory(int chatId, {int fromMessageId = 0, int offset = 0, int limit = 30}) async {
-    return await send('getChatHistory', {
-      'chat_id': chatId,
-      'from_message_id': fromMessageId,
-      'offset': offset,
-      'limit': limit,
-      'only_local': false,
-    });
-  }
-
-  Future<Map<String, dynamic>> sendMessage(int chatId, String text) async {
-    return await send('sendMessage', {
-      'chat_id': chatId,
-      'input_message_content': {
-        '@type': 'inputMessageText',
-        'text': {
-          '@type': 'formattedText',
-          'text': text,
-        },
-        'disable_web_page_preview': false,
-        'clear_draft': true,
-      }
-    });
-  }
-
-  Future<Map<String, dynamic>> searchPublicChat(String username) async {
-    return await send('searchPublicChat', {
-      'username': username,
-    });
-  }
-
-  Future<Map<String, dynamic>> getActiveSessions() async {
-    return await send('getActiveSessions', {});
-  }
-
-  Future<Map<String, dynamic>> terminateSession(int sessionId) async {
-    return await send('terminateSession', {
-      'session_id': sessionId,
-    });
-  }
-
-  Future<Map<String, dynamic>> terminateAllOtherSessions() async {
-    return await send('terminateAllOtherSessions', {});
-  }
-
-  Timer? _updateTimer;
-
-  void _startUpdateLoop() {
-    _updateTimer?.cancel();
-    _updateTimer = Timer.periodic(const Duration(milliseconds: 50), (_) async {
-      if (_clientId == null) {
-        _updateTimer?.cancel();
-        return;
-      }
-      try {
-        final update = await TdClient.receive(_clientId!, 0.0);
-        if (update != null) {
-          _updateController.add(update);
-          _handleInternalUpdate(update);
-        }
-      } catch (e) {
-        debugPrint("TDLib Receive Error: $e");
-      }
-    });
-  }
-
-  void _handleInternalUpdate(Map<String, dynamic> update) {
-    final type = update['@type'];
-    if (type == 'updateAuthorizationState') {
-      final state = update['authorization_state']['@type'];
-      debugPrint("Auth State Updated: $state");
-      
-      if (state == 'authorizationStateWaitEncryptionKey') {
-        send('checkDatabaseEncryptionKey', {
-          'encryption_key': '',
-        }).catchError((err) {
-          debugPrint("Failed to send encryption key: $err");
-        });
-      }
+  Future<void> destroyClient() async {
+    _timer?.cancel();
+    _timer = null;
+    final id = _clientId;
+    _clientId = null;
+    // Cancel all pending requests
+    for (final c in _pending.values) {
+      c.completeError('Client destroyed');
+    }
+    _pending.clear();
+    if (id != null) {
+      TdPlugin.instance.tdJsonClientSend(id, json.encode({'@type': 'close'}));
     }
   }
 
-  Future<void> destroyClient() async {
-    _updateTimer?.cancel();
-    _updateTimer = null;
-    if (_clientId != null) {
-      await send('close', {});
-      _clientId = null;
+  // ── Public API ──────────────────────────────────────────────────────────
+
+  /// Send a TDLib request and await its response.
+  Future<Map<String, dynamic>> send(String method, Map<String, dynamic> params,
+      {Duration timeout = const Duration(seconds: 30)}) async {
+    if (_clientId == null) throw Exception('TDLib not initialized');
+    final id = (_reqId++).toString();
+    final c = Completer<Map<String, dynamic>>();
+    _pending[id] = c;
+    TdPlugin.instance.tdJsonClientSend(
+        _clientId!, json.encode({'@type': method, '@extra': id, ...params}));
+    return c.future.timeout(timeout, onTimeout: () {
+      _pending.remove(id);
+      throw TimeoutException('TDLib request timed out: $method');
+    });
+  }
+
+  Future<Map<String, dynamic>> getChats({int limit = 100}) =>
+      send('getChats', {'chat_list': {'@type': 'chatListMain'}, 'limit': limit});
+
+  Future<Map<String, dynamic>> getChat(int chatId) =>
+      send('getChat', {'chat_id': chatId});
+
+  Future<Map<String, dynamic>> getChatHistory(int chatId,
+          {int fromMessageId = 0, int offset = 0, int limit = 50}) =>
+      send('getChatHistory', {
+        'chat_id': chatId,
+        'from_message_id': fromMessageId,
+        'offset': offset,
+        'limit': limit,
+        'only_local': false,
+      });
+
+  Future<Map<String, dynamic>> sendMessage(int chatId, String text) =>
+      send('sendMessage', {
+        'chat_id': chatId,
+        'input_message_content': {
+          '@type': 'inputMessageText',
+          'text': {'@type': 'formattedText', 'text': text},
+          'disable_web_page_preview': false,
+          'clear_draft': true,
+        },
+      });
+
+  Future<Map<String, dynamic>> searchPublicChat(String username) =>
+      send('searchPublicChat', {'username': username});
+
+  /// Search contacts + public chats by query
+  Future<Map<String, dynamic>> searchChatsAndUsers(String query) =>
+      send('searchChatsOnServer', {'query': query, 'limit': 20});
+
+  Future<Map<String, dynamic>> searchContacts(String query, {int limit = 20}) =>
+      send('searchContacts', {'query': query, 'limit': limit});
+
+  Future<Map<String, dynamic>> getMe() => send('getMe', {});
+
+  Future<Map<String, dynamic>> getActiveSessions() =>
+      send('getActiveSessions', {});
+
+  Future<Map<String, dynamic>> terminateSession(int sessionId) =>
+      send('terminateSession', {'session_id': sessionId});
+
+  Future<Map<String, dynamic>> terminateAllOtherSessions() =>
+      send('terminateAllOtherSessions', {});
+
+  // ── Internal loop ───────────────────────────────────────────────────────
+  void _startLoop() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      final id = _clientId;
+      if (id == null) { _timer?.cancel(); return; }
+      try {
+        final raw = TdPlugin.instance.tdJsonClientReceive(id, 0.0);
+        if (raw != null && raw.isNotEmpty) {
+          final Map<String, dynamic> upd = json.decode(raw);
+          _dispatch(upd);
+        }
+      } catch (e) {
+        debugPrint('TDLib recv error: $e');
+      }
+    });
+  }
+
+  void _rawSend(Map<String, dynamic> data) {
+    if (_clientId == null) return;
+    TdPlugin.instance.tdJsonClientSend(_clientId!, json.encode(data));
+  }
+
+  void _dispatch(Map<String, dynamic> upd) {
+    // Route response to pending completer if @extra present
+    final extra = upd['@extra'];
+    if (extra != null) {
+      final key = extra.toString();
+      final c = _pending.remove(key);
+      if (c != null && !c.isCompleted) {
+        if (upd['@type'] == 'error') {
+          c.completeError('TDLib error ${upd['code']}: ${upd['message']}');
+        } else {
+          c.complete(upd);
+        }
+        return;
+      }
+    }
+
+    // Broadcast to listeners
+    _updateCtrl.add(upd);
+
+    // Internal handlers
+    final type = upd['@type'];
+    if (type == 'updateAuthorizationState') {
+      final state = upd['authorization_state']['@type'];
+      debugPrint('Auth: $state');
+      if (state == 'authorizationStateWaitEncryptionKey') {
+        _rawSend({'@type': 'checkDatabaseEncryptionKey', 'encryption_key': ''});
+      }
     }
   }
 }

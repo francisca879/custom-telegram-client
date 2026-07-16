@@ -59,27 +59,43 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final result = await _tdService.getChats();
+      final result = await _tdService.getChats(limit: 100);
       final List<dynamic> chatIds = result['chat_ids'] ?? [];
-      
+
       _chats.clear();
-      for (final int id in chatIds) {
-        final chat = await _tdService.send('getChat', {'chat_id': id});
-        _chats.add(chat);
+      for (final dynamic id in chatIds) {
+        try {
+          final chat = await _tdService.getChat(id as int);
+          _chats.add(chat);
+        } catch (e) {
+          debugPrint('Failed to load chat $id: $e');
+        }
       }
-      
+
+      // Sort by position order (TDLib 1.8+: positions array)
       _chats.sort((a, b) {
-        final int orderA = a['order'] ?? 0;
-        final int orderB = b['order'] ?? 0;
-        return orderB.compareTo(orderA);
+        int orderOf(Map<String, dynamic> chat) {
+          final positions = chat['positions'] as List?;
+          if (positions != null && positions.isNotEmpty) {
+            final pos = positions.first;
+            final order = pos['order'];
+            if (order is int) return order;
+            if (order is String) return int.tryParse(order) ?? 0;
+          }
+          return 0;
+        }
+        return orderOf(b).compareTo(orderOf(a));
       });
     } catch (e) {
-      debugPrint("Error loading chats: $e");
+      debugPrint('loadChats error: $e');
     } finally {
       _isLoadingChats = false;
       notifyListeners();
     }
   }
+
+
+
 
   Future<void> loadMessages(int chatId) async {
     _isLoadingMessages = true;
