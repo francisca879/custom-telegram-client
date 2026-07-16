@@ -586,7 +586,9 @@ class _SearchPageState extends State<_SearchPage> {
     final src = item['_src'];
     if (src == 'contact') {
       final u = item['username'] ??
-          (item['usernames']?['active_usernames'] as List?)?.firstOrNull;
+          ((item['usernames']?['active_usernames'] as List?)?.isNotEmpty == true
+              ? (item['usernames']?['active_usernames'] as List).first
+              : null);
       return u != null ? '@$u' : '';
     }
     // public chat

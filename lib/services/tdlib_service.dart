@@ -32,7 +32,7 @@ class TdLibService {
 
     _startLoop();
 
-    await _rawSend({
+    _rawSend({
       '@type': 'setTdlibParameters',
       'use_test_dc': false,
       'database_directory': sessionDir,
