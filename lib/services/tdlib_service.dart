@@ -111,6 +111,12 @@ class TdLibService {
     });
   }
 
+  Future<Map<String, dynamic>> searchPublicChat(String username) async {
+    return await send('searchPublicChat', {
+      'username': username,
+    });
+  }
+
   Future<Map<String, dynamic>> getActiveSessions() async {
     return await send('getActiveSessions', {});
   }

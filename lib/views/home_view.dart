@@ -261,6 +261,19 @@ class _HomeViewState extends State<HomeView> {
             ),
             const Divider(color: Color(0xFF2C2C2E), height: 1),
             ListTile(
+              leading: const Icon(Icons.diamond_outlined, color: Colors.purpleAccent),
+              title: Text(
+                "Telegram Premium",
+                style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w500),
+              ),
+              subtitle: const Text("Verify status & manage Premium", style: TextStyle(color: Colors.grey, fontSize: 12)),
+              onTap: () {
+                Navigator.pop(context);
+                _showPremiumDialog(context, controller);
+              },
+            ),
+            const Divider(color: Color(0xFF2C2C2E), height: 1),
+            ListTile(
               leading: const Icon(Icons.devices_rounded, color: Colors.white),
               title: Text(
                 "Login Activity",
@@ -276,6 +289,123 @@ class _HomeViewState extends State<HomeView> {
           ],
         ),
       ),
+    );
+  }
+
+  void _showPremiumDialog(BuildContext context, AccountController controller) {
+    // Sync current premium state from the server dynamically when opening the modal
+    controller.syncPremiumStatus();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Consumer<AccountController>(
+          builder: (context, valController, child) {
+            final acc = valController.currentAccount;
+            final isPrem = acc?.isPremium ?? false;
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF161618),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  const Icon(Icons.diamond_rounded, color: Colors.purpleAccent, size: 28),
+                  const SizedBox(width: 12),
+                  Text(
+                    "Telegram Premium",
+                    style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Account: ${acc?.firstName ?? 'User'} (${acc?.phoneNumber ?? ''})",
+                    style: GoogleFonts.outfit(color: Colors.white70, fontSize: 14),
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isPrem ? Colors.purple.withOpacity(0.1) : Colors.redAccent.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isPrem ? Colors.purpleAccent.withOpacity(0.3) : Colors.redAccent.withOpacity(0.2),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          isPrem ? Icons.check_circle : Icons.cancel_outlined,
+                          color: isPrem ? Colors.purpleAccent : Colors.redAccent,
+                          size: 32,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          isPrem ? "Premium Active 👑" : "No Active Premium ❌",
+                          style: GoogleFonts.outfit(
+                            color: isPrem ? Colors.purpleAccent : Colors.redAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "Note: Telegram Premium is bound to your phone number on official Telegram servers.\n\n"
+                    "If this account gets frozen or deleted, you can manage or shift billing by starting @PremiumBot on your new active number.",
+                    style: GoogleFonts.outfit(color: Colors.grey, fontSize: 12, height: 1.4),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Close", style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    // Search for official Telegram Premium Bot and open the chat directly in the client
+                    try {
+                      final chatRes = await controller.tdService.searchPublicChat("PremiumBot");
+                      final int chatId = chatRes['id'] ?? 0;
+                      if (chatId != 0) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ChatView(
+                              chatId: chatId,
+                              chatTitle: "Premium Bot 💎",
+                            ),
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Failed to open Premium Bot: $e")),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    "Open @PremiumBot",
+                    style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

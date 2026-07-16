@@ -7,12 +7,14 @@ class TelegramAccount {
   final String firstName;
   final String username;
   final String photoPath;
+  final bool isPremium;
 
   TelegramAccount({
     required this.phoneNumber,
     required this.firstName,
     required this.username,
     required this.photoPath,
+    this.isPremium = false,
   });
 
   Map<String, String> toMap() {
@@ -21,6 +23,7 @@ class TelegramAccount {
       'firstName': firstName,
       'username': username,
       'photoPath': photoPath,
+      'isPremium': isPremium.toString(),
     };
   }
 
@@ -30,6 +33,7 @@ class TelegramAccount {
       firstName: map['firstName'] ?? '',
       username: map['username'] ?? '',
       photoPath: map['photoPath'] ?? '',
+      isPremium: map['isPremium'] == 'true',
     );
   }
 }
@@ -58,11 +62,13 @@ class AccountController extends ChangeNotifier {
       for (final item in savedList) {
         final parts = item.split('::');
         if (parts.length >= 4) {
+          final bool isPrem = parts.length >= 5 ? parts[4] == 'true' : false;
           _accounts.add(TelegramAccount(
             phoneNumber: parts[0],
             firstName: parts[1],
             username: parts[2],
             photoPath: parts[3],
+            isPremium: isPrem,
           ));
         }
       }
@@ -75,6 +81,36 @@ class AccountController extends ChangeNotifier {
       await _tdService.initClient(_currentAccount!.phoneNumber);
     }
     notifyListeners();
+  }
+
+  // Sync premium status from Telegram server
+  Future<void> syncPremiumStatus() async {
+    if (_currentAccount == null) return;
+    try {
+      final me = await _tdService.send('getMe', {});
+      final bool isPrem = me['is_premium'] ?? false;
+      
+      // Update account field
+      final idx = _accounts.indexWhere((a) => a.phoneNumber == _currentAccount!.phoneNumber);
+      if (idx != -1) {
+        final updated = TelegramAccount(
+          phoneNumber: _accounts[idx].phoneNumber,
+          firstName: _accounts[idx].firstName,
+          username: _accounts[idx].username,
+          photoPath: _accounts[idx].photoPath,
+          isPremium: isPrem,
+        );
+        _accounts[idx] = updated;
+        _currentAccount = updated;
+        
+        final prefs = await SharedPreferences.getInstance();
+        final savedList = _accounts.map((a) => '${a.phoneNumber}::${a.firstName}::${a.username}::${a.photoPath}::${a.isPremium}').toList();
+        await prefs.setStringList('hosted_accounts', savedList);
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint("Failed to sync premium status: $e");
+    }
   }
 
   // Switch between up to 50 concurrent logged-in accounts
@@ -105,6 +141,7 @@ class AccountController extends ChangeNotifier {
     required String firstName,
     required String username,
     String photoPath = '',
+    bool isPremium = false,
   }) async {
     // Prevent duplicate profiles
     _accounts.removeWhere((a) => a.phoneNumber == phoneNumber);
@@ -114,6 +151,7 @@ class AccountController extends ChangeNotifier {
       firstName: firstName,
       username: username,
       photoPath: photoPath,
+      isPremium: isPremium,
     );
     
     _accounts.add(newAccount);
@@ -121,7 +159,7 @@ class AccountController extends ChangeNotifier {
     
     // Cache profiles list in SharedPreferences
     final prefs = await SharedPreferences.getInstance();
-    final savedList = _accounts.map((a) => '${a.phoneNumber}::${a.firstName}::${a.username}::${a.photoPath}').toList();
+    final savedList = _accounts.map((a) => '${a.phoneNumber}::${a.firstName}::${a.username}::${a.photoPath}::${a.isPremium}').toList();
     await prefs.setStringList('hosted_accounts', savedList);
     await prefs.setString('active_account_phone', phoneNumber);
     
@@ -141,7 +179,7 @@ class AccountController extends ChangeNotifier {
     }
     
     final prefs = await SharedPreferences.getInstance();
-    final savedList = _accounts.map((a) => '${a.phoneNumber}::${a.firstName}::${a.username}::${a.photoPath}').toList();
+    final savedList = _accounts.map((a) => '${a.phoneNumber}::${a.firstName}::${a.username}::${a.photoPath}::${a.isPremium}').toList();
     await prefs.setStringList('hosted_accounts', savedList);
     if (_currentAccount == null) {
       await prefs.remove('active_account_phone');
