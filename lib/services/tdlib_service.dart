@@ -44,7 +44,7 @@ class TdLibService {
 
     _clientId = await TdClient.create();
     
-    final appDir = await getApplicationDocumentsDirectory();
+    final appDir = await getApplicationSupportDirectory();
     final String sessionDir = '${appDir.path}/sessions/account_$phoneNumber';
     await Directory(sessionDir).create(recursive: true);
 
