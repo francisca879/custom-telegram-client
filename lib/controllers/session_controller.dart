@@ -17,14 +17,17 @@ class SessionController extends ChangeNotifier {
 
     try {
       final result = await _tdService.getActiveSessions();
+      debugPrint("getActiveSessions raw result: $result");
       _sessions = result['sessions'] ?? [];
-    } catch (e) {
+    } catch (e, stack) {
       debugPrint("Failed to load active sessions: $e");
+      debugPrint("Stacktrace: $stack");
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
+
 
   Future<void> terminateSession(int sessionId) async {
     try {

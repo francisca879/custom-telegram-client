@@ -574,7 +574,7 @@ class _SearchPageState extends State<_SearchPage> {
 
     final results = <Map<String, dynamic>>[];
 
-    // 1. Search contacts by name
+    // 1. Search contacts by name (local)
     try {
       final r = await widget.tdService.searchContacts(q, limit: 10);
       final ids = (r['user_ids'] as List?) ?? [];
@@ -586,14 +586,30 @@ class _SearchPageState extends State<_SearchPage> {
       }
     } catch (_) {}
 
-    // 2. Try public username search
+    // 2. Try exact username search first (if query starts with @ or is a potential username)
     final uname = q.startsWith('@') ? q.substring(1) : q;
-    if (uname.length >= 3) {
+    if (uname.length >= 3 && !uname.contains(' ')) {
       try {
         final chat = await widget.tdService.searchPublicChat(uname);
         if (chat['id'] != null) {
-          final exists = results.any((r) => r['id'] == chat['id']);
-          if (!exists) results.insert(0, {'_src': 'public', ...chat});
+          results.insert(0, {'_src': 'public', ...chat});
+        }
+      } catch (_) {}
+    }
+
+    // 3. Global search for public channels/groups/users on Telegram server
+    if (q.length >= 3) {
+      try {
+        final r = await widget.tdService.send('searchPublicChats', {'query': q});
+        final chatIds = (r['chat_ids'] as List?) ?? [];
+        for (final cid in chatIds) {
+          try {
+            final chat = await widget.tdService.send('getChat', {'chat_id': cid});
+            final exists = results.any((item) => item['id'] == chat['id']);
+            if (!exists) {
+              results.add({'_src': 'public', ...chat});
+            }
+          } catch (_) {}
         }
       } catch (_) {}
     }
@@ -601,6 +617,7 @@ class _SearchPageState extends State<_SearchPage> {
     if (!mounted) return;
     setState(() { _results = results; _loading = false; });
   }
+
 
 
   String _getName(Map<String, dynamic> item) {
