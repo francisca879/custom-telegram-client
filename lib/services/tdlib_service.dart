@@ -51,22 +51,20 @@ class TdLibService {
     _startUpdateLoop();
 
     await send('setTdlibParameters', {
-      'parameters': {
-        'use_test_dc': false,
-        'database_directory': sessionDir,
-        'files_directory': '$sessionDir/files',
-        'use_file_database': true,
-        'use_chat_info_database': true,
-        'use_message_database': true,
-        'use_secret_chats': false,
-        'api_id': 39624542,
-        'api_hash': 'aeec5e61d5e8fc87fe7e5b63a7b5e17c',
-        'system_language_code': 'en',
-        'device_model': Platform.isAndroid ? 'Android Device' : 'iOS Device',
-        'system_version': Platform.operatingSystemVersion,
-        'application_version': '1.0.0',
-        'enable_storage_optimizer': true,
-      }
+      'use_test_dc': false,
+      'database_directory': sessionDir,
+      'files_directory': '$sessionDir/files',
+      'use_file_database': true,
+      'use_chat_info_database': true,
+      'use_message_database': true,
+      'use_secret_chats': false,
+      'api_id': 39624542,
+      'api_hash': 'aeec5e61d5e8fc87fe7e5b63a7b5e17c',
+      'system_language_code': 'en',
+      'device_model': Platform.isAndroid ? 'Android Device' : 'iOS Device',
+      'system_version': Platform.operatingSystemVersion,
+      'application_version': '1.0.0',
+      'enable_storage_optimizer': true,
     });
   }
 
